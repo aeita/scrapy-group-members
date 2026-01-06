@@ -826,6 +826,9 @@ function cleanDescription(description) {
   return null;
 }
 class WhatsAppStorage extends ListStorage {
+  constructor(options) {
+    super(options);
+  }
   get headers() {
     return [
       "Phone Number",
@@ -900,45 +903,32 @@ function buildCTABtns() {
     updateConter();
   }, 1e3);
 }
-let modalObserver;
-function listenModalChanges() {
-  const groupNameNode = document.querySelectorAll("header span[style*='height']:not(.copyable-text)");
-  let source;
-  if (groupNameNode.length == 1) {
-    source = groupNameNode[0].textContent;
-  }
-  const modalElems = document.querySelectorAll('[data-animate-modal-body="true"]');
-  const modalElem = modalElems[0];
-  const targetNode = modalElem.querySelectorAll("div[style*='height']")[1];
+let sidebarObserver;
+function listenSidebarChanges(targetNode) {
   const config = { attributes: true, childList: true, subtree: true };
   const callback = (mutationList) => {
     for (const mutation of mutationList) {
-      if (mutation.type === "childList") {
-        if (mutation.addedNodes.length > 0) {
-          const node = mutation.addedNodes[0];
-          const text = node.textContent;
-          if (text) {
-            const textClean = text.trim();
-            if (textClean.length > 0) {
-              if (!textClean.match(/Loading About/i) && !textClean.match(/I am using WhatsApp/i) && !textClean.match(/Available/i))
-                ;
-            }
-          }
-        }
-      } else if (mutation.type === "attributes") {
+      if (mutation.type === "attributes") {
         const target = mutation.target;
         const tagName = target.tagName;
-        if (["div"].indexOf(tagName.toLowerCase()) === -1 || target.getAttribute("role") !== "listitem") {
+        if (["div"].indexOf(tagName.toLowerCase()) === -1 || target.getAttribute("role") !== "row") {
           continue;
         }
-        const listItem = target;
+        const rowItem = target;
         window.setTimeout(async () => {
+          const isContact = rowItem.querySelector('[data-icon="default-contact-refreshed"], img');
+          const isGroup = rowItem.querySelector('[data-icon="default-group"]');
+          if (!isContact || isGroup) {
+            return;
+          }
+          if (rowItem.textContent === "Contacts" || rowItem.textContent === "Groups") {
+            return;
+          }
           let profileName = "";
           let profileDescription = "";
-          let profilePhone = "";
-          const titleElems = listItem.querySelectorAll("span[title]:not(.copyable-text)");
+          const titleElems = rowItem.querySelectorAll("span[title]:not(.copyable-text)");
           if (titleElems.length > 0) {
-            const text = titleElems[0].textContent;
+            const text = titleElems[0].getAttribute("title") || titleElems[0].textContent;
             if (text) {
               const name = cleanName(text);
               if (name && name.length > 0) {
@@ -949,7 +939,7 @@ function listenModalChanges() {
           if (profileName.length === 0) {
             return;
           }
-          const descriptionElems = listItem.querySelectorAll("span[title].copyable-text");
+          const descriptionElems = rowItem.querySelectorAll('span[data-testid="selectable-text"], ._ak8k');
           if (descriptionElems.length > 0) {
             const text = descriptionElems[0].textContent;
             if (text) {
@@ -959,36 +949,15 @@ function listenModalChanges() {
               }
             }
           }
-          const phoneElems = listItem.querySelectorAll("span[style*='height']:not([title])");
-          if (phoneElems.length > 0) {
-            const text = phoneElems[0].textContent;
-            if (text) {
-              const textClean = text.trim();
-              if (textClean && textClean.length > 0) {
-                profilePhone = textClean;
-              }
-            }
-          }
+          const identifier = profileName;
           if (profileName) {
-            const identifier = profilePhone ? profilePhone : profileName;
-            console.log(identifier);
-            const data = {};
-            if (source) {
-              data.source = source;
-            }
+            const data = {
+              name: profileName
+            };
             if (profileDescription) {
               data.description = profileDescription;
             }
-            if (profilePhone) {
-              data.phoneNumber = profilePhone;
-              if (profileName) {
-                data.name = profileName;
-              }
-            } else {
-              if (profileName) {
-                data.phoneNumber = profileName;
-              }
-            }
+            data.phoneNumber = profileName;
             await memberListStore.addElem(
               identifier,
               {
@@ -999,27 +968,27 @@ function listenModalChanges() {
               // Update
             );
             logsTracker.addHistoryLog({
-              label: `Scraping ${profileName}`,
+              label: `Capturing ${profileName}`,
               category: LogCategory.LOG
             });
             updateConter();
           }
-        }, 10);
+        }, 50);
       }
     }
   };
-  modalObserver = new MutationObserver(callback);
-  modalObserver.observe(targetNode, config);
+  sidebarObserver = new MutationObserver(callback);
+  sidebarObserver.observe(targetNode, config);
 }
-function stopListeningModalChanges() {
-  if (modalObserver) {
-    modalObserver.disconnect();
+function stopListeningSidebarChanges() {
+  if (sidebarObserver) {
+    sidebarObserver.disconnect();
   }
 }
 function main() {
   buildCTABtns();
   logsTracker.addHistoryLog({
-    label: "Wait for modal",
+    label: "Ready! Use the search bar",
     category: LogCategory.LOG
   });
   function bodyCallback(mutationList) {
@@ -1028,28 +997,18 @@ function main() {
         if (mutation.addedNodes.length > 0) {
           mutation.addedNodes.forEach((node) => {
             const htmlNode = node;
-            const modalElems = htmlNode.querySelectorAll('[data-animate-modal-body="true"]');
-            if (modalElems.length > 0) {
+            if (!htmlNode.querySelectorAll)
+              return;
+            const sidebarElems = htmlNode.querySelectorAll('[aria-label="Search results."], [aria-label="Chat list"]');
+            if (sidebarElems.length > 0) {
               window.setTimeout(() => {
-                listenModalChanges();
+                stopListeningSidebarChanges();
+                listenSidebarChanges(sidebarElems[0]);
                 logsTracker.addHistoryLog({
-                  label: "Modal found - Scroll to scrape",
+                  label: "Search active - Scroll results",
                   category: LogCategory.LOG
                 });
-              }, 10);
-            }
-          });
-        }
-        if (mutation.removedNodes.length > 0) {
-          mutation.removedNodes.forEach((node) => {
-            const htmlNode = node;
-            const modalElems = htmlNode.querySelectorAll('[data-animate-modal-body="true"]');
-            if (modalElems.length > 0) {
-              stopListeningModalChanges();
-              logsTracker.addHistoryLog({
-                label: "Modal Removed - Scraping Stopped",
-                category: LogCategory.LOG
-              });
+              }, 50);
             }
           });
         }
@@ -1061,6 +1020,10 @@ function main() {
   const app = document.getElementById("app");
   if (app) {
     bodyObserver.observe(app, bodyConfig);
+  }
+  const existingSidebar = document.querySelector('[aria-label="Search results."], [aria-label="Chat list"]');
+  if (existingSidebar) {
+    listenSidebarChanges(existingSidebar);
   }
 }
 main();

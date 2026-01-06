@@ -3,7 +3,7 @@
   "scripts": {
     "minify": "uglifyjs --compress --mangle --output dist/main.min.js -- dist/main.mjs",
     "build-vite": "tsc && vite build",
-    "build": "yarn build-vite && yarn minify && build-readme README.md"
+    "build": "npm run build-vite && npm run minify && npx build-readme README.md"
   },
   "author": "",
   "license": "MIT",

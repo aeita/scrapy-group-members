@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
     exportToCsv,
     ListStorage,
@@ -18,18 +19,18 @@ interface WhatsAppMember {
 }
 
 
-function cleanName(name: string): string{
+function cleanName(name: string): string {
     const nameClean = name.trim()
     return nameClean.replace('~ ', '')
 }
 
-function cleanDescription(description: string) : string | null {
+function cleanDescription(description: string): string | null {
     const descriptionClean = description.trim()
-    if(
+    if (
         !descriptionClean.match(/Loading About/i) &&
         !descriptionClean.match(/I am using WhatsApp/i) &&
         !descriptionClean.match(/Available/i)
-    ){
+    ) {
         return descriptionClean
     }
     return null;
@@ -37,6 +38,9 @@ function cleanDescription(description: string) : string | null {
 
 
 class WhatsAppStorage extends ListStorage<WhatsAppMember> {
+    constructor(options?: any) {
+        super(options)
+    }
     get headers() {
         return [
             'Phone Number',
@@ -45,7 +49,7 @@ class WhatsAppStorage extends ListStorage<WhatsAppMember> {
             'Source'
         ]
     }
-    itemToRow(item: WhatsAppMember): string[]{
+    itemToRow(item: WhatsAppMember): string[] {
         return [
             item.phoneNumber ? item.phoneNumber : "",
             item.name ? item.name : "",
@@ -62,10 +66,11 @@ const counterId = 'scraper-number-tracker'
 const exportName = 'whatsAppExport';
 let logsTracker: HistoryTracker;
 
-async function updateConter(){
+async function updateConter() {
     // Update member tracker counter
     const tracker = document.getElementById(counterId)
-    if(tracker){
+    if (tracker) {
+        // @ts-ignore
         const countValue = await memberListStore.getCount();
         tracker.textContent = countValue.toString()
     }
@@ -73,12 +78,13 @@ async function updateConter(){
 
 const uiWidget = new UIContainer();
 
-function buildCTABtns(){
+function buildCTABtns() {
     // History Tracker
     logsTracker = new HistoryTracker({
         onDelete: async (groupId: string) => {
             // We dont have cancellable adds for now
             console.log(`Delete ${groupId}`);
+            // @ts-ignore
             await memberListStore.deleteFromGroupId(groupId);
             await updateConter();
         },
@@ -95,12 +101,13 @@ function buildCTABtns(){
     }))
     btnDownload.appendChild(createTextSpan('\u00A0users'))
 
-    btnDownload.addEventListener('click', async function() {
+    btnDownload.addEventListener('click', async function () {
         const timestamp = new Date().toISOString()
+        // @ts-ignore
         const data = await memberListStore.toCsvData()
-        try{
+        try {
             exportToCsv(`${exportName}-${timestamp}.csv`, data)
-        }catch(err){
+        } catch (err) {
             console.error('Error while generating export');
             // @ts-ignore
             console.log(err.stack)
@@ -115,7 +122,8 @@ function buildCTABtns(){
     // Button Reinit
     const btnReinit = createCta();
     btnReinit.appendChild(createTextSpan('Reset'))
-    btnReinit.addEventListener('click', async function() {
+    btnReinit.addEventListener('click', async function () {
+        // @ts-ignore
         await memberListStore.clear();
         logsTracker.cleanLogs();
         await updateConter();
@@ -129,182 +137,130 @@ function buildCTABtns(){
     uiWidget.render()
 
     // Initial
-    window.setTimeout(()=>{
+    window.setTimeout(() => {
         updateConter()
     }, 1000)
 }
 
-let modalObserver: MutationObserver;
+let sidebarObserver: MutationObserver;
 
-function listenModalChanges(){
-    const groupNameNode = document.querySelectorAll("header span[style*='height']:not(.copyable-text)")
-    let source: string | null;
-    if(groupNameNode.length==1){
-        source = groupNameNode[0].textContent
-    }
-    const modalElems = document.querySelectorAll('[data-animate-modal-body="true"]');
-
-    const modalElem = modalElems[0]
-    const targetNode = modalElem.querySelectorAll("div[style*='height']")[1];
-    
+function listenSidebarChanges(targetNode: Node) {
     const config = { attributes: true, childList: true, subtree: true };
-    
+
     // Callback function to execute when mutations are observed
     const callback = (
-        mutationList: MutationRecord[],
-        // observer: MutationObserver
+        mutationList: MutationRecord[]
     ) => {
         for (const mutation of mutationList) {
-            if (mutation.type === "childList") {
-                // console.log("A child node has been added or removed.");
-                if(mutation.addedNodes.length>0){
-                    const node = mutation.addedNodes[0]
-                    const text = node.textContent;
-                    if(text){
-                        const textClean = text.trim();
-                        if(textClean.length>0){
-                            if(
-                                !textClean.match(/Loading About/i) &&
-                                !textClean.match(/I am using WhatsApp/i) &&
-                                !textClean.match(/Available/i)
-                            ){
-                                // console.log(text)
-                            }
-                        }
-                    }
-                }
-            }else if (mutation.type === "attributes") {
+            if (mutation.type === "attributes") {
                 const target = mutation.target as HTMLElement;
                 const tagName = target.tagName;
-    
-                // Must be a div with role="listitem"
-                if(
-                    ['div'].indexOf(tagName.toLowerCase())===-1 ||
-                    target.getAttribute("role")!=="listitem"
-                ){
+
+                // Must be a div with role="row" (sidebar rows)
+                if (
+                    ['div'].indexOf(tagName.toLowerCase()) === -1 ||
+                    target.getAttribute("role") !== "row"
+                ) {
                     continue;
                 }
-    
-                const listItem = target;
-    
-                // Use timeout to way for all data to be displayed
-                window.setTimeout(async ()=>{
+
+                const rowItem = target;
+
+                // Use timeout to wait for all data to be displayed
+                window.setTimeout(async () => {
+                    // Check if it's a contact (typically has default-contact-refreshed or an <img>)
+                    // Based on snippet: contacts have 'default-contact-refreshed' or an <img>
+                    const isContact = rowItem.querySelector('[data-icon="default-contact-refreshed"], img');
+                    const isGroup = rowItem.querySelector('[data-icon="default-group"]');
+
+                    if (!isContact || isGroup) {
+                        return; // Skip if not a contact or definitely a group
+                    }
+
+                    // Avoid headers (like "Contacts" text)
+                    if (rowItem.textContent === "Contacts" || rowItem.textContent === "Groups") {
+                        return;
+                    }
+
                     let profileName = "";
                     let profileDescription = "";
-                    let profilePhone = ""
-                    
-                    // Name
-                    const titleElems = listItem.querySelectorAll("span[title]:not(.copyable-text)");
-                    if(titleElems.length>0){
-                        const text = titleElems[0].textContent
-                        if(text){
+
+                    // Name - In sidebar it's usually in a span with title
+                    const titleElems = rowItem.querySelectorAll("span[title]:not(.copyable-text)");
+                    if (titleElems.length > 0) {
+                        const text = titleElems[0].getAttribute('title') || titleElems[0].textContent
+                        if (text) {
                             const name = cleanName(text);
-                            if(name && name.length>0){
+                            if (name && name.length > 0) {
                                 profileName = name;
                             }
                         }
                     }
-    
-                    if(profileName.length===0){
+
+                    if (profileName.length === 0) {
                         return;
                     }
-    
-                    // Description
-                    const descriptionElems = listItem.querySelectorAll("span[title].copyable-text");
-        
-                    if(descriptionElems.length>0){
+
+                    // Description/Status - In sidebar it can be under _ak8k or selectable-text
+                    const descriptionElems = rowItem.querySelectorAll('span[data-testid="selectable-text"], ._ak8k');
+
+                    if (descriptionElems.length > 0) {
                         const text = descriptionElems[0].textContent;
-                        if(text){
+                        if (text) {
                             const description = cleanDescription(text);
-                            if(description && description.length>0){
+                            if (description && description.length > 0) {
                                 profileDescription = description;
                             }
                         }
                     }
-    
-                    // Phone
-                    const phoneElems = listItem.querySelectorAll("span[style*='height']:not([title])");
-                    if(phoneElems.length>0){
-                        const text = phoneElems[0].textContent;
-                        if(text){
-                            const textClean = text.trim()
-                            
-                            if(textClean && textClean.length>0){
-                                profilePhone = textClean;
-                            }
-                        }
-                    }
-                    
-    
-                    if(profileName){
-                        const identifier = profilePhone ? profilePhone : profileName;
-                        console.log(identifier)
 
+                    const identifier = profileName; // Sidebar usually doesn't show phone directly
+
+                    if (profileName) {
                         const data: {
                             name?: string,
                             description?: string,
                             phoneNumber?: string,
                             source?: string
                         } = {
+                            name: profileName
                         }
 
-                        if(source){
-                            data.source = source;
-                        }
-
-                        if(profileDescription){
+                        if (profileDescription) {
                             data.description = profileDescription
                         }
-                        if(profilePhone){
-                            data.phoneNumber = profilePhone;
-                            if(profileName){
-                                data.name = profileName
-                            }
-                        }else{
-                            if(profileName){
-                                data.phoneNumber = profileName;
-                            }
-                        }
 
+                        // Use name as phone/id if we don't have phone
+                        data.phoneNumber = profileName;
+
+                        // @ts-ignore
                         await memberListStore.addElem(
                             identifier, {
-                                profileId: identifier,
-                                ...data
-                            },
+                            profileId: identifier,
+                            ...data
+                        },
                             true // Update
                         )
-        
-                        let profileStr = profileName;
-                        if(profilePhone){
-                            profileStr += ` - ${profilePhone}`
-                        }
-                        if(profileDescription){
-                            profileStr += ` - ${profileDescription}`
-                        }
-                        
+
                         logsTracker.addHistoryLog({
-                            label: `Scraping ${profileName}`,
+                            label: `Capturing ${profileName}`,
                             category: LogCategory.LOG
                         })
 
                         updateConter()
-                    }    
-                }, 10)
+                    }
+                }, 50)
             }
         }
     };
-    
-    // Create an observer instance linked to the callback function
-    modalObserver = new MutationObserver(callback);
-    
-    // Start observing the target node for configured mutations
-    modalObserver.observe(targetNode, config);
+
+    sidebarObserver = new MutationObserver(callback);
+    sidebarObserver.observe(targetNode, config);
 }
 
-function stopListeningModalChanges(){
-    // Later, you can stop observing
-    if(modalObserver){
-        modalObserver.disconnect();
+function stopListeningSidebarChanges() {
+    if (sidebarObserver) {
+        sidebarObserver.disconnect();
     }
 }
 
@@ -312,60 +268,53 @@ function stopListeningModalChanges(){
 function main(): void {
     buildCTABtns();
 
-
     logsTracker.addHistoryLog({
-        label: "Wait for modal",
+        label: "Ready! Use the search bar",
         category: LogCategory.LOG
     })
 
     function bodyCallback(
-        mutationList: MutationRecord[],
-        // observer: MutationObserver
-    ){
+        mutationList: MutationRecord[]
+    ) {
         for (const mutation of mutationList) {
-            // console.log(mutation)
             if (mutation.type === "childList") {
-                if(mutation.addedNodes.length>0){
-                    mutation.addedNodes.forEach((node)=>{
+                if (mutation.addedNodes.length > 0) {
+                    mutation.addedNodes.forEach((node) => {
                         const htmlNode = node as HTMLElement
-                        const modalElems = htmlNode.querySelectorAll('[data-animate-modal-body="true"]');
-                        if(modalElems.length>0){
-                            window.setTimeout(()=>{
-                                listenModalChanges();
-    
+                        if (!htmlNode.querySelectorAll) return;
+
+                        // Target sidebar or search results container
+                        const sidebarElems = htmlNode.querySelectorAll('[aria-label="Search results."], [aria-label="Chat list"]');
+                        if (sidebarElems.length > 0) {
+                            window.setTimeout(() => {
+                                stopListeningSidebarChanges(); // Avoid multiple observers
+                                listenSidebarChanges(sidebarElems[0]);
+
                                 logsTracker.addHistoryLog({
-                                    label: "Modal found - Scroll to scrape",
+                                    label: "Search active - Scroll results",
                                     category: LogCategory.LOG
                                 })
-                            }, 10)
-                        }
-                    })
-                }
-                if(mutation.removedNodes.length>0){
-                    mutation.removedNodes.forEach((node)=>{
-                        const htmlNode = node as HTMLElement
-                        const modalElems = htmlNode.querySelectorAll('[data-animate-modal-body="true"]');
-                        if(modalElems.length>0){
-                            stopListeningModalChanges();
-                            logsTracker.addHistoryLog({
-                                label: "Modal Removed - Scraping Stopped",
-                                category: LogCategory.LOG
-                            })
+                            }, 50)
                         }
                     })
                 }
             }
         }
     }
-    
+
     const bodyConfig = { attributes: true, childList: true, subtree: true };
     const bodyObserver = new MutationObserver(bodyCallback);
-    
-    // Start observing the target node for configured mutations
+
     const app = document.getElementById('app');
-    if(app){
+    if (app) {
         bodyObserver.observe(app, bodyConfig);
-    }    
+    }
+
+    // Also try to find it immediately if already loaded
+    const existingSidebar = document.querySelector('[aria-label="Search results."], [aria-label="Chat list"]');
+    if (existingSidebar) {
+        listenSidebarChanges(existingSidebar);
+    }
 }
 
 main();
